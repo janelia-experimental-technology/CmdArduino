@@ -1,5 +1,9 @@
 /*******************************************************************
-    Copyright (C) 2009 FreakLabs
+   
+Forked by Steve Sawtelle, Janelia, HHMI 2023
+- changed a few things as detailed below
+
+   Copyright (C) 2009 FreakLabs
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -29,6 +33,25 @@
 
     Originally written by Christopher Wang aka Akiba.
     Please post support questions to the FreakLabs forum.
+	
+	20231101 sws
+	 - comment out #include <avr/pgmspace.h> as it won't compile for ESP32-S3 Rev TFT Feather
+	20220509 sws
+	 - use define for maximum number of arguments (MAX_ARGS) - was 30
+	20210607 sws
+	 - use #define to provide original verbose command interface
+	 - use #define to allow ignoring case
+	20210207 sws
+	 - don't let msg_ptr overrun buffer 	
+	20190120 sws	
+     - add cmdList to show commands available
+	20180506 sws
+	 - do not display banner or prompt
+	 - if command error, just show '?', not error message
+	20180424 sws 
+	 - added ',' as token 
+	previoius
+	- added CmdStr2Float
 
 *******************************************************************/
 /*!
@@ -38,7 +61,7 @@
     its possible to execute individual functions within the sketch.
 */
 /**************************************************************************/
-#include <avr/pgmspace.h>
+//#include <avr/pgmspace.h>
 #if ARDUINO >= 100
 #include <Arduino.h>
 #else
@@ -46,6 +69,9 @@
 #endif
 #include "HardwareSerial.h"
 #include "Cmd.h"
+
+// #define CMDPROMPT	// use this to display the original banner and prompts
+#define IGNORECASE	// use this to ignore upper/lower case 
 
 // command line message buffer and pointer
 static uint8_t msg[MAX_MSG_SIZE];
@@ -89,19 +115,22 @@ void cmd_display()
 void cmd_parse(char *cmd)
 {
     uint8_t argc, i = 0;
-    char *argv[30];
-    char buf[50];
+    char *argv[MAX_ARGS];
+	#ifdef CMDPROMPT 
+	char buf[50];
+	#endif
     cmd_t *cmd_entry;
 
     fflush(stdout);
+	
 
     // parse the command line statement and break it up into space-delimited
     // strings. the array of strings will be saved in the argv array.
-    argv[i] = strtok(cmd, " ");
+    argv[i] = strtok(cmd, " ,");
     do
     {
-        argv[++i] = strtok(NULL, " ");
-    } while ((i < 30) && (argv[i] != NULL));
+        argv[++i] = strtok(NULL, " ,");
+    } while ((i < MAX_ARGS) && (argv[i] != NULL));
 
     // save off the number of arguments for the particular command.
     argc = i;
@@ -113,16 +142,38 @@ void cmd_parse(char *cmd)
         if (!strcmp(argv[0], cmd_entry->cmd))
         {
             cmd_entry->func(argc, argv);
+			#ifdef CMDPROMPT
             cmd_display();
+			#endif
             return;
         }
     }
 
     // command not recognized. print message and re-generate prompt.
+	#ifdef CMDPROMPT
     strcpy_P(buf, cmd_unrecog);
     stream->println(buf);
+    #else
+	stream->println("?");
+    #endif
+}	
 
-    cmd_display();
+// ====================================
+//  cmdList
+//  show the commands we have available
+// ====================================
+
+void cmdList()
+{
+    cmd_t *cmd_entry;
+	
+    // parse the command table for valid command. used argv[0] which is the
+    // actual command name typed in at the prompt
+    for (cmd_entry = cmd_tbl; cmd_entry != NULL; cmd_entry = cmd_entry->next)
+    {
+		stream->println(cmd_entry->cmd);
+    }
+
 }
 
 /**************************************************************************/
@@ -134,15 +185,21 @@ void cmd_parse(char *cmd)
 /**************************************************************************/
 void cmd_handler()
 {
-    char c = stream->read();
-
-    switch (c)
+	#ifdef IGNORECASE
+    char c = toupper(stream->read());  // ignore case
+	#else
+	char c = stream->read();
+	#endif
+	
+	switch (c)
     {
     case '\r':
         // terminate the msg and reset the msg ptr. then send
         // it to the handler for processing.
         *msg_ptr = '\0';
+		#ifdef CMDPROMPT
         stream->print("\r\n");
+		#endif
         cmd_parse((char *)msg);
         msg_ptr = msg;
         break;
@@ -154,7 +211,9 @@ void cmd_handler()
 
     case '\b':
         // backspace
+		#ifdef CMDPROMPT
         stream->print(c);
+		#endif
         if (msg_ptr > msg)
         {
             msg_ptr--;
@@ -163,8 +222,11 @@ void cmd_handler()
 
     default:
         // normal character entered. add it to the buffer
+		#ifdef CMDPROMPT
         stream->print(c);
-        *msg_ptr++ = c;
+		#endif
+		if( (msg_ptr - msg) < (MAX_MSG_SIZE-1) )  // sws - don't overrun buffer, leave room for null
+			*msg_ptr++ = c;
         break;
     }
 }
@@ -213,12 +275,21 @@ void cmdAdd(const char *name, void (*func)(int argc, char **argv))
 
     // alloc memory for command name
     char *cmd_name = (char *)malloc(strlen(name)+1);
-
+	
     // copy command name
     strcpy(cmd_name, name);
 
     // terminate the command name
     cmd_name[strlen(name)] = '\0';
+	
+	#ifdef IGNORECASE
+	int i = 0;
+	while( cmd_name[i] != '\0')
+	{	
+		cmd_name[i] = toupper(cmd_name[i]);
+	    i++;
+	}	
+    #endif
 
     // fill out structure
     cmd_tbl->cmd = cmd_name;
@@ -248,4 +319,14 @@ Stream* cmdGetStream(void)
 uint32_t cmdStr2Num(char *str, uint8_t base)
 {
     return strtol(str, NULL, base);
+}
+
+/**************************************************************************/
+/*!
+    Convert a string to a floating point number, base 10 only  
+*/
+/**************************************************************************/
+float cmdStr2Float(char *str)
+{
+    return strtof(str, NULL);
 }

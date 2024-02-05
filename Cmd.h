@@ -41,9 +41,9 @@
 #ifndef CMD_H
 #define CMD_H
 
-#define MAX_MSG_SIZE    60
+#define MAX_MSG_SIZE    256
+#define MAX_ARGS  30
 #include <stdint.h>
-#include <Arduino.h>
 
 // command line structure
 typedef struct _cmd_t
@@ -58,5 +58,7 @@ void cmdPoll();
 void cmdAdd(const char *name, void (*func)(int argc, char **argv));
 Stream* cmdGetStream(void);
 uint32_t cmdStr2Num(char *str, uint8_t base);
+float cmdStr2Float(char *str);
+void cmdList();
 
 #endif //CMD_H
